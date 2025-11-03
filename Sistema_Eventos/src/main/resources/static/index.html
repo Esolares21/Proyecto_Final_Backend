@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Administración de Eventos - UMG</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f9; }
+        .container { max-width: 1000px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); }
+        h1 { color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; }
+        h2 { color: #34495e; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background-color: #3498db; color: white; }
+        tr:hover { background-color: #f5f5f5; }
+        button { background-color: #2ecc71; color: white; border: none; padding: 8px 12px; cursor: pointer; border-radius: 4px; margin-right: 5px; }
+        button:hover { background-color: #27ae60; }
+        .delete-btn { background-color: #e74c3c; }
+        .delete-btn:hover { background-color: #c0392b; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; font-weight: bold; }
+        .form-group input { width: 98%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>Sistema de Administración de Eventos</h1>
+
+    <h2>Crear/Editar Evento</h2>
+    <form id="eventoForm">
+        <input type="hidden" id="eventoId" value="">
+        <div class="form-group">
+            <label for="nombre">Nombre:</label>
+            <input type="text" id="nombre" required>
+        </div>
+        <div class="form-group">
+            <label for="fechaHora">Fecha y Hora:</label>
+            <input type="datetime-local" id="fechaHora" required>
+        </div>
+        <div class="form-group">
+            <label for="lugar">Lugar:</label>
+            <input type="text" id="lugar" required>
+        </div>
+        <div class="form-group">
+            <label for="precioEntrada">Precio Entrada (Opcional - Dejar vacío para Gratis):</label>
+            <input type="number" id="precioEntrada" step="0.01" value="0.00">
+        </div>
+        <button type="submit" id="submitBtn">Crear Evento</button>
+        <button type="button" onclick="limpiarFormulario()">Cancelar/Limpiar</button>
+    </form>
+
+    <h2>Lista de Eventos Registrados</h2>
+    <table>
+        <thead>
+        <tr>
+            <th>ID</th>
+            <th>Nombre</th>
+            <th>Fecha y Hora</th>
+            <th>Lugar</th>
+            <th>Precio</th>
+            <th>Acciones</th>
+        </tr>
+        </thead>
+        <tbody id="eventosTableBody">
+        </tbody>
+    </table>
+</div>
+
+<script>
+    // La URL de tu API REST
+    const API_URL = 'http://localhost:8080/api/v1/eventos';
+
+    // Función para limpiar el formulario y resetear el botón
+    function limpiarFormulario() {
+        document.getElementById('eventoForm').reset();
+        document.getElementById('eventoId').value = '';
+        document.getElementById('submitBtn').textContent = 'Crear Evento';
+        document.getElementById('submitBtn').style.backgroundColor = '#2ecc71';
+    }
+
+    // --- FUNCIONES CRUD ---
+
+    // Función para obtener y listar todos los eventos (READ ALL)
+    async function obtenerEventos() {
+        try {
+            const response = await fetch(API_URL);
+            const eventos = await response.json();
+            const tbody = document.getElementById('eventosTableBody');
+            tbody.innerHTML = ''; // Limpiar tabla antes de llenar
+
+            eventos.forEach(evento => {
+                const row = tbody.insertRow();
+                // Formateo de fecha: Asegurarse de manejar la zona horaria correctamente
+                const fecha = new Date(evento.fechaHora);
+                const fechaFormateada = fecha.toLocaleString('es-GT', {
+                    year: 'numeric', month: '2-digit', day: '2-digit',
+                    hour: '2-digit', minute: '2-digit', hour12: true
+                }).replace(',', ''); // Eliminar la coma si aparece
+
+                row.insertCell(0).textContent = evento.id;
+                row.insertCell(1).textContent = evento.nombre;
+                row.insertCell(2).textContent = fechaFormateada;
+                row.insertCell(3).textContent = evento.lugar;
+
+                // Manejo de Precio Gratis
+                const precioTexto = (evento.precioEntrada === null || evento.precioEntrada === 0 || parseFloat(evento.precioEntrada) === 0)
+                    ? 'Gratis'
+                    : 'Q ' + parseFloat(evento.precioEntrada).toFixed(2);
+                row.insertCell(4).textContent = precioTexto;
+
+                // Editar y Eliminar
+                const accionesCell = row.insertCell(5);
+                const btnEditar = document.createElement('button');
+                btnEditar.textContent = 'Editar';
+                btnEditar.onclick = () => cargarEventoParaEdicion(evento.id);
+                accionesCell.appendChild(btnEditar);
+
+                const btnEliminar = document.createElement('button');
+                btnEliminar.textContent = 'Eliminar';
+                btnEliminar.className = 'delete-btn';
+                btnEliminar.onclick = () => eliminarEvento(evento.id, evento.nombre);
+                accionesCell.appendChild(btnEliminar);
+            });
+
+        } catch (error) {
+            console.error('Error al obtener los eventos:', error);
+            // Ya que el backend ya tiene manejo de errores, este error es de red/cors.
+            alert('Error de conexión con el backend. Revisa la consola de Spring Boot y el puerto.');
+        }
+    }
+
+    // Función para cargar los datos de un evento en el formulario (Edición)
+    async function cargarEventoParaEdicion(id) {
+        const response = await fetch(`${API_URL}/${id}`);
+        const evento = await response.json();
+
+        // Convertir la fecha al formato ISO 'YYYY-MM-DDTHH:MM' para el input datetime-local
+        // Si el valor del backend es una cadena ISO, funciona directamente con slice(0, 16)
+        const fechaISO = new Date(evento.fechaHora).toISOString().slice(0, 16);
+
+        document.getElementById('eventoId').value = evento.id;
+        document.getElementById('nombre').value = evento.nombre;
+        document.getElementById('fechaHora').value = fechaISO;
+        document.getElementById('lugar').value = evento.lugar;
+        // Si el precio es null, poner 0 en el input para edición.
+        document.getElementById('precioEntrada').value = evento.precioEntrada !== null ? evento.precioEntrada : '0.00';
+
+        document.getElementById('submitBtn').textContent = 'Guardar Cambios';
+        document.getElementById('submitBtn').style.backgroundColor = '#f39c12';
+    }
+
+    // Función para enviar el formulario (CREATE/UPDATE)
+    document.getElementById('eventoForm').addEventListener('submit', async function(event) {
+        event.preventDefault();
+
+        const id = document.getElementById('eventoId').value;
+        const nombre = document.getElementById('nombre').value;
+        const fechaHora = document.getElementById('fechaHora').value;
+        const lugar = document.getElementById('lugar').value;
+
+        // --- AQUÍ ESTABA EL ERROR ---
+        // Se debe leer el valor del input *antes* de intentar usarlo
+        const precioEntradaRaw = document.getElementById('precioEntrada').value;
+        // Se procesa para enviarlo como número (o 0 si está vacío/inválido)
+        const precioEntrada = (precioEntradaRaw === '' || isNaN(parseFloat(precioEntradaRaw)))
+            ? 0.00 // Enviamos 0.00 si el usuario lo deja vacío o pone algo no numérico
+            : parseFloat(precioEntradaRaw);
+        // -----------------------------
+
+        // Crear el objeto de datos que se enviará al backend
+        const datosEvento = {
+            nombre: nombre,
+            fechaHora: fechaHora + ':00', // Agregamos :00 para cumplir el formato ISO 8601 que espera Spring
+            lugar: lugar,
+            precioEntrada: precioEntrada
+        };
+
+        const metodo = id ? 'PUT' : 'POST';
+        const url = id ? `${API_URL}/${id}` : API_URL;
+
+        try {
+            const response = await fetch(url, {
+                method: metodo,
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(datosEvento)
+            });
+
+            const responseBody = await response.json(); // Leer el cuerpo de la respuesta
+
+            if (!response.ok) {
+                // Manejo de errores con el formato centralizado (Paso 2)
+                let mensajeError = `Error al ${id ? 'actualizar' : 'crear'} evento (${response.status} - ${responseBody.error}).`;
+                if (responseBody.message) {
+                    mensajeError += `\nDetalle: ${responseBody.message}`;
+                }
+                alert(mensajeError);
+                return;
+            }
+
+            alert(`Evento ${id ? 'actualizado' : 'creado'} con éxito! ID: ${responseBody.id}`);
+            limpiarFormulario();
+            obtenerEventos(); // Recargar la tabla
+        } catch (error) {
+            console.error('Error de red al enviar datos:', error);
+            alert('Error de conexión. Asegúrate de que el backend está corriendo y es accesible.');
+        }
+    });
+
+    // Función para eliminar un evento (DELETE)
+    async function eliminarEvento(id, nombre) {
+        if (!confirm(`¿Estás seguro de que quieres eliminar el evento "${nombre}" (ID: ${id})?`)) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`${API_URL}/${id}`, {
+                method: 'DELETE'
+            });
+
+            if (response.status === 204) {
+                alert('Evento eliminado con éxito!');
+                obtenerEventos(); // Recargar la tabla
+            } else if (response.status === 404) {
+                alert('Error: El evento no fue encontrado.');
+            } else {
+                // Si hay error, intentamos leer el cuerpo para el mensaje centralizado
+                const errorBody = await response.json();
+                alert(`Error al eliminar evento: ${errorBody.status} - ${errorBody.error}`);
+            }
+        } catch (error) {
+            console.error('Error de red al eliminar:', error);
+            alert('Error de conexión. Asegúrate de que el backend está corriendo.');
+        }
+    }
+
+    window.onload = obtenerEventos;
+</script>
+</body>
+</html>
